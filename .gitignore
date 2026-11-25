@@ -11,3 +11,6 @@ wheels/
 
 # mac stuff
 .DS_Store
+
+# example outputs
+preview/
