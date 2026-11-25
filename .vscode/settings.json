@@ -1,0 +1,4 @@
+{
+  // Let ruff.toml override the user-level ruff settings (extendSelect ALL, lineLength 120).
+  "ruff.configurationPreference": "filesystemFirst",
+}
