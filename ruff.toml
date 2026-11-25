@@ -1,0 +1,36 @@
+line-length = 100
+
+[lint]
+select = ["ALL"]
+ignore = [
+    # Noise during early development; revisit before a release.
+    "D",       # docstrings (pydocstyle)
+    "CPY",     # copyright notices
+    "T20",     # print statements
+    "ERA",     # commented-out code
+    "FIX",     # FIXME/TODO/XXX comments
+    "TD",      # TODO formatting
+    "EM",      # exception message must not be a string literal / f-string
+    "TRY003",  # long messages outside exception class
+    "FBT",     # boolean positional args (common in pyvista/gmsh calls)
+    "TC",      # move imports into TYPE_CHECKING blocks
+    "RET504",  # assignment right before return
+    # Numerical/geometry code.
+    "PLR2004", # magic values in comparisons
+    "N803",    # uppercase argument names (A, R, X)
+    "N806",    # uppercase local variable names
+    # Complexity limits.
+    "C901",
+    "PLR0912", # too many branches
+    "PLR0913", # too many arguments
+    "PLR0914", # too many locals
+    "PLR0915", # too many statements
+    "PLR0917", # too many positional arguments
+    # Leave line length and trailing commas to the formatter.
+    "E501",
+    "COM812",  # conflicts with ruff format
+]
+
+[lint.per-file-ignores]
+"examples/*" = ["INP001"]  # scripts, not a package
+"tests/*" = ["S101", "ANN", "INP001"]
