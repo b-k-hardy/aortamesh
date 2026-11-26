@@ -1,0 +1,24 @@
+# aortamesh run configuration. Relative paths are relative to this file.
+# Every key is optional; leaving one out uses the default shown.
+
+directory = "examples/with_arch_branches"  # case folder: surface.vtp and *.mrk.json
+output = ""                                # "" = <directory>/mesh
+
+[mesh]
+size_max = 2.0            # mm
+size_min = 0.5            # mm
+radius_elements = 16      # elements around the vessel: size = 2*pi*r/N, r from centerline.vtp; 0 = off
+curvature_elements = 20   # elements per 2*pi of wall curvature (surfaces only when radius_elements > 0); 0 = off
+optimize_netgen = true
+min_quality = 0.05        # warn if any tet's min SICN is below this (<= 0 is an error)
+verbose = false           # print gmsh's log
+
+[boundary_layer]
+enabled = true
+layers = 3
+first_height = 0.2       # mm; layer k is first_height * growth**k thick
+growth = 1.5              # total = sum of the layers (0.95 mm here); keep < 1/3 of the smallest opening radius
+
+[cheart]
+name = "mesh"             # writes <output>/mesh.X, mesh.T, mesh.B
+scale = 1.0               # coordinates x scale: 1.0 = mm, 1e-3 = m (match density/viscosity units)
