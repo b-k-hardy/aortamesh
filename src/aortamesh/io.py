@@ -61,6 +61,33 @@ def read_surface(path: str | Path, coordinate_system: str = "LPS") -> pv.PolyDat
 
 
 # =============================================================================
+# Centerline
+# =============================================================================
+@dataclass(frozen=True)
+class Centerline:
+    """Centerline points with the lumen radius at each (Slicer/VMTK maximum inscribed sphere)."""
+
+    points: np.ndarray  # (n, 3)
+    radius: np.ndarray  # (n,) mm
+
+
+def read_centerline(path: str | Path, coordinate_system: str = "LPS") -> Centerline:
+    """Read a centerline model exported from Slicer's Extract Centerline (needs ``Radius``)."""
+    path = Path(path)
+    cl = pv.read(path)
+    if "Radius" not in cl.point_data:
+        raise ValueError(f"{path.name}: no 'Radius' point array; expected a VMTK centerline")
+    src = "LPS"
+    if "SPACE" in cl.field_data:
+        src = str(np.asarray(cl.field_data["SPACE"]).ravel()[0])
+    points = _convert(np.asarray(cl.points, dtype=np.float64), src, coordinate_system)
+    radius = np.asarray(cl.point_data["Radius"], dtype=np.float64)
+    if (radius <= 0).any():
+        raise ValueError(f"{path.name}: non-positive centerline radius")
+    return Centerline(points=points, radius=radius)
+
+
+# =============================================================================
 # Cut planes
 # =============================================================================
 @dataclass(frozen=True)
@@ -127,17 +154,22 @@ class Case:
     surface: pv.PolyData
     cuts: list[Cut]
     coordinate_system: str = "LPS"
+    centerline: Centerline | None = None
 
 
 def load_case(
     directory: str | Path,
     surface_name: str = "surface.vtp",
     coordinate_system: str = "LPS",
+    centerline_name: str = "centerline.vtp",
 ) -> Case:
-    """Load ``<directory>/surface.vtp`` and all ``*.mrk.json`` planes beside it."""
+    """Load ``<directory>/surface.vtp``, all ``*.mrk.json`` planes, and the centerline if present."""
     directory = Path(directory)
     surface = read_surface(directory / surface_name, coordinate_system)
     cuts = read_cuts(directory, coordinate_system)
+    centerline = None
+    if (directory / centerline_name).exists():
+        centerline = read_centerline(directory / centerline_name, coordinate_system)
 
     # Every plane center must sit inside the lumen, or rays cast from it are meaningless.
     probe = pv.PolyData(np.array([c.center for c in cuts]))
@@ -146,4 +178,9 @@ def load_case(
         bad = [c.name for c, ok in zip(cuts, inside) if not ok]
         raise ValueError(f"plane centers outside the lumen: {bad}")
 
-    return Case(surface=surface, cuts=cuts, coordinate_system=coordinate_system)
+    return Case(
+        surface=surface,
+        cuts=cuts,
+        coordinate_system=coordinate_system,
+        centerline=centerline,
+    )
