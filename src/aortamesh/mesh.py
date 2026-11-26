@@ -65,10 +65,6 @@ class BoundaryLayer:
     def thickness(self) -> float:
         return float(self.heights[-1])
 
-    @property
-    def last_height(self) -> float:
-        return self.first_height * self.growth ** (self.layers - 1)
-
 
 @dataclass(frozen=True)
 class MeshOptions:

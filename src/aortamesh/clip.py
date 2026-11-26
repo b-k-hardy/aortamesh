@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import numpy as np
 import pyvista as pv
 
+from aortamesh.geometry import plane_basis, polygon_centroid_2d
 from aortamesh.io import Cut
 
 
@@ -73,30 +74,6 @@ class RayCaster:
             if t.size > 1:
                 second[i] = t[1]
         return first, second
-
-    def first_hits(self, origin: np.ndarray, directions: np.ndarray) -> np.ndarray:
-        """Distance to the first wall hit along each unit direction (NaN where a ray misses)."""
-        return self.hits(origin, directions)[0]
-
-
-def plane_basis(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Two unit vectors (u, v) spanning the plane, with (u, v, normal) right-handed."""
-    n = normal / np.linalg.norm(normal)
-    helper = np.eye(3)[np.argmin(np.abs(n))]  # the axis least aligned with n
-    u = np.cross(n, helper)
-    u /= np.linalg.norm(u)
-    return u, np.cross(n, u)
-
-
-def _polygon_centroid_2d(xy: np.ndarray) -> tuple[np.ndarray, float]:
-    """Area centroid and area of a simple polygon (vertices in order, not repeated)."""
-    x, y = xy[:, 0], xy[:, 1]
-    xn, yn = np.roll(x, -1), np.roll(y, -1)
-    cross = x * yn - xn * y
-    area = 0.5 * cross.sum()
-    cx = ((x + xn) * cross).sum() / (6 * area)
-    cy = ((y + yn) * cross).sum() / (6 * area)
-    return np.array([cx, cy]), abs(area)
 
 
 # =============================================================================
@@ -160,14 +137,14 @@ def fit_cross_section(
 
     center = cut.center.copy()
     for it in range(1, max_iter + 1):
-        radii = caster.first_hits(center, dirs)
+        radii, _ = caster.hits(center, dirs)
         if np.isnan(radii).any():
             raise RuntimeError(
                 f"{cut.name}: {np.isnan(radii).sum()}/{n_rays} rays missed the wall; "
                 "is the plane center inside the lumen?",
             )
         xy = radii[:, None] * np.c_[np.cos(theta), np.sin(theta)]  # hits in (u, v) coords
-        c2, area = _polygon_centroid_2d(xy)
+        c2, area = polygon_centroid_2d(xy)
         step = float(np.linalg.norm(c2))
         center = center + c2[0] * u + c2[1] * v
         if step < tol * np.sqrt(area / np.pi):
@@ -181,7 +158,7 @@ def fit_cross_section(
     radii, beyond = caster.hits(center, dirs)
     clearance = np.where(np.isnan(beyond), np.inf, beyond - radii)
     xy = radii[:, None] * np.c_[np.cos(theta), np.sin(theta)]
-    _, area = _polygon_centroid_2d(xy)
+    _, area = polygon_centroid_2d(xy)
 
     med = np.median(radii)
     if (radii > outlier_factor * med).any():
@@ -207,22 +184,33 @@ def fit_cross_section(
 # =============================================================================
 # Clipping surfaces
 # =============================================================================
+def clip_polygon(
+    section: CrossSection,
+    margin: float = 0.25,
+    pad: float = 1.0,
+) -> np.ndarray:
+    """(n, 3) vertices of the star-shaped clipping polygon, one per ray, in ray order.
+
+    Each vertex sits at ``r * (1 + margin) + pad`` along its ray (a relative margin plus an
+    absolute one in mm), but never more than halfway across the gap to the next surface the
+    ray meets. So it always reaches past this vessel's wall and never into a neighbour's.
+    """
+    r = section.radii * (1.0 + margin) + pad
+    r = np.minimum(r, section.radii + 0.5 * section.clearance)
+    return section.center + r[:, None] * section.directions
+
+
 def clipping_surface(
     section: CrossSection,
     margin: float = 0.25,
     pad: float = 1.0,
 ) -> pv.PolyData:
-    """Star-shaped clipping polygon in the cut plane.
+    """The clipping polygon as a surface, for ParaView.
 
-    Each vertex sits at ``r * (1 + margin) + pad`` along its ray (a relative margin plus an
-    absolute one in mm), but never more than halfway across the gap to the next surface the
-    ray meets. So it always reaches past this vessel's wall and never into a neighbour's.
     Triangulated as a fan from the center, which is valid because the polygon is star-shaped
     about it by construction.
     """
-    r = section.radii * (1.0 + margin) + pad
-    r = np.minimum(r, section.radii + 0.5 * section.clearance)
-    rim = section.center + r[:, None] * section.directions
+    rim = clip_polygon(section, margin, pad)
     pts = np.vstack([section.center, rim])
     n = len(rim)
     i = np.arange(n)

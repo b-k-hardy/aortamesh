@@ -35,7 +35,8 @@ makes the VS Code extension use it over user settings.
 ## Layout
 
 - `src/aortamesh/io.py`: `read_surface`, `read_cut`, `read_cuts`, `read_centerline` → `Centerline(points, radius)`, `load_case` → `Case(surface, cuts, centerline)` (centerline is None if there's no `centerline.vtp`)
-- `src/aortamesh/clip.py`: `RayCaster`, `fit_cross_section` → `CrossSection`, `clipping_surface`, `section_outline`
+- `src/aortamesh/clip.py`: `RayCaster`, `fit_cross_section` → `CrossSection`, `clip_polygon` (array), `clipping_surface` / `section_outline` (PolyData for ParaView)
+- `src/aortamesh/geometry.py`: shared helpers `plane_basis`, `polygon_centroid_2d`, `triangle_areas`
 - `src/aortamesh/cut.py`: `cut_surface(surface, sections)` → open wall `pv.PolyData` + `list[Opening]`; `boundary_loops`
 - `src/aortamesh/cli.py` (+ `__main__.py`): `main(argv=None)`, entry point `aortamesh`
 - `src/aortamesh/mesh.py`: `mesh_volume(wall, openings, MeshOptions, centerline)` → `VolumeMesh`; `BoundaryLayer`, `enclosed_volume`

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -99,7 +99,6 @@ class Cut:
         np.ndarray
     )  # (3,) a point on the plane, inside the lumen (not necessarily centered)
     normal: np.ndarray  # (3,) unit normal; its sign is arbitrary and is fixed later
-    source: Path | None = field(default=None, compare=False)
 
 
 def read_cut(path: str | Path, coordinate_system: str = "LPS") -> Cut:
@@ -123,7 +122,7 @@ def read_cut(path: str | Path, coordinate_system: str = "LPS") -> Cut:
     normal /= np.linalg.norm(normal)
 
     name = path.name.removesuffix(".mrk.json")
-    return Cut(name=name, center=center, normal=normal, source=path)
+    return Cut(name=name, center=center, normal=normal)
 
 
 def _cut_order(name: str) -> tuple[int, int, str]:
@@ -153,7 +152,6 @@ def read_cuts(directory: str | Path, coordinate_system: str = "LPS") -> list[Cut
 class Case:
     surface: pv.PolyData
     cuts: list[Cut]
-    coordinate_system: str = "LPS"
     centerline: Centerline | None = None
 
 
@@ -181,6 +179,5 @@ def load_case(
     return Case(
         surface=surface,
         cuts=cuts,
-        coordinate_system=coordinate_system,
         centerline=centerline,
     )

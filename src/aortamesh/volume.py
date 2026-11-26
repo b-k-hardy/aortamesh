@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 import pyvista as pv
 
+from aortamesh.geometry import triangle_areas
+
 # Faces of a positively oriented tet (v0..v3), each wound so its normal points out of the tet.
 _TET_FACES = np.array([[1, 2, 3], [0, 3, 2], [0, 1, 3], [0, 2, 1]])
 
@@ -98,7 +100,7 @@ class VolumeMesh:
         return float(_signed_volumes(self.points, self.tets).sum())
 
     def label_areas(self) -> dict[str, float]:
-        a = _triangle_areas(self.points, self.bnd_tris)
+        a = triangle_areas(self.points, self.bnd_tris)
         return {
             name: float(a[self.bnd_labels == lab].sum()) for lab, name in self.label_names.items()
         }
@@ -135,7 +137,3 @@ def _signed_volumes(points: np.ndarray, tets: np.ndarray) -> np.ndarray:
     a, b, c, d = (points[tets[:, i]] for i in range(4))
     return np.einsum("ij,ij->i", np.cross(b - a, c - a), d - a) / 6.0
 
-
-def _triangle_areas(points: np.ndarray, tris: np.ndarray) -> np.ndarray:
-    a, b, c = (points[tris[:, i]] for i in range(3))
-    return 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)

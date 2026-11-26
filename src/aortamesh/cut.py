@@ -24,7 +24,8 @@ import pyvista as pv
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
-from aortamesh.clip import CrossSection, clipping_surface, plane_basis
+from aortamesh.clip import CrossSection, clip_polygon
+from aortamesh.geometry import plane_basis, polygon_centroid_2d, triangle_areas
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ def cut_surface(
 ) -> tuple[pv.PolyData, list[Opening]]:
     """Cut ``surface`` open at every section, in order. Returns the open wall and its openings.
 
-    ``margin`` and ``pad`` size the clipping polygons (see ``clipping_surface``). ``snap`` is
+    ``margin`` and ``pad`` size the clipping polygons (see ``clip_polygon``). ``snap`` is
     relative to the median edge length: vertices within that distance of a plane are moved
     onto it. Raises if a cut doesn't split the surface in two, or if the smaller piece is
     more than ``max_area_ratio`` of the larger.
@@ -93,7 +94,7 @@ def _cut_one(
     name = section.cut.name
     c, n = section.center, section.normal
     u, v = plane_basis(n)
-    polygon = np.asarray(clipping_surface(section, margin, pad).points)[1:]
+    polygon = clip_polygon(section, margin, pad)
     inside = _in_star_polygon(pts, c, u, v, polygon)
 
     # 1. Snap near-plane vertices onto the plane (only inside the polygon).
@@ -128,7 +129,7 @@ def _cut_one(
         )
 
     # 3. Discard the smaller piece.
-    rest_area = _triangle_areas(pts, rest)
+    rest_area = triangle_areas(pts, rest)
     a_plus = float(rest_area[rest_comp == plus[0]].sum())
     a_minus = float(rest_area[rest_comp == minus[0]].sum())
     keep = 1.0 if a_plus >= a_minus else -1.0
@@ -147,11 +148,11 @@ def _cut_one(
     all_pts = np.vstack([pts, new_pts]) if len(new_pts) else pts
     all_pts, new_tris = _drop_unused(all_pts, new_tris)
 
-    area_before = float(_triangle_areas(pts, tris).sum())
-    area_after = float(_triangle_areas(all_pts, new_tris).sum())
+    area_before = float(triangle_areas(pts, tris).sum())
+    area_after = float(triangle_areas(all_pts, new_tris).sum())
 
     rim = _find_rim(all_pts, new_tris, c, n, u, v, polygon, snap, name)
-    rim_area = _polygon_area_2d(np.c_[(rim - c) @ u, (rim - c) @ v])
+    _, rim_area = polygon_centroid_2d(np.c_[(rim - c) @ u, (rim - c) @ v])
 
     opening = Opening(
         name=name,
@@ -267,19 +268,9 @@ def _drop_unused(pts: np.ndarray, tris: np.ndarray) -> tuple[np.ndarray, np.ndar
     return pts[used], inv.reshape(tris.shape)
 
 
-def _triangle_areas(pts: np.ndarray, tris: np.ndarray) -> np.ndarray:
-    a, b, c = pts[tris[:, 0]], pts[tris[:, 1]], pts[tris[:, 2]]
-    return 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
-
-
 def _edge_lengths(pts: np.ndarray, tris: np.ndarray) -> np.ndarray:
     p = pts[tris]
     return np.linalg.norm(p[:, [1, 2, 0]] - p, axis=2).ravel()
-
-
-def _polygon_area_2d(xy: np.ndarray) -> float:
-    x, y = xy[:, 0], xy[:, 1]
-    return 0.5 * abs(float((x * np.roll(y, -1) - np.roll(x, -1) * y).sum()))
 
 
 def _in_star_polygon(
