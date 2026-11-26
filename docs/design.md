@@ -32,10 +32,11 @@ normal aorta *fluid* domain is currently desired.
 | Load           | `io.load_case` → surface + ordered cuts, LPS, float64            | **done** |
 | Cross-sections | ray-cast each plane, re-center, clip polygon                     | **done** |
 | Cut            | split surface with each clip polygon, remove the piece beyond it | **done** |
-| Mesh           | gmsh: reparametrize, boundary layer, cap, fill, label            | **next** |
-| Neutral mesh   | `VolumeMesh` dataclass                                           | todo     |
-| Writers        | CHeart X/T/B, XDMF, VTU                                          | todo     |
-| Checks         | quality, label coverage, cap areas                               | todo     |
+| Mesh           | gmsh: reparametrize, boundary layer, cap, fill, label            | **done** |
+| Neutral mesh   | `VolumeMesh` dataclass                                           | **done** |
+| Config         | TOML → `Config` / `MeshOptions` (`config.py`, `sample_config.toml`) | **done** |
+| Writers        | CHeart X/T/B (**done**, `cheart.py`); VTU via `to_pyvista`; XDMF | partial  |
+| Checks         | quality, label coverage, cap areas                               | partial  |
 
 ## 3. Inputs from Slicer
 
@@ -162,14 +163,81 @@ Still open: cut planes should be close to perpendicular to the vessel, or the bo
 at the rim comes out skewed. The centerline (`centerline.vtp`, 4 polylines: aorta + 3
 branches) could be used to check or set this.
 
-## 6. Meshing in gmsh
+## 6. Meshing in gmsh (`mesh.py`, done)
+
+`mesh_volume(wall, openings, MeshOptions, centerline) -> VolumeMesh`. The wall goes in through the API as a
+discrete entity (no temp files), gmsh remeshes it, and the boundary layer is extruded inward
+(height sign **negative** for our outward-oriented walls). Each hole in the inner surface gets
+a plane cap, and the core volume fills the inside. Boundary labels are assigned after meshing:
+wall entities → 1, and every other boundary surface (caps plus the layer's side faces) goes to
+the nearest opening's cap disk → 2, 3, … in cut order. **This numbering is provisional** (§11).
+
+Options (`MeshOptions`, `BoundaryLayer`; all also in the TOML): `size_max` 2.0,
+`size_min` 0.5, `radius_elements` 16, `curvature_elements` 20, `optimize_netgen` on,
+`min_quality` 0.05 (warn), and a boundary layer of 3 layers, first height 0.15 mm, growth
+1.5 (0.71 mm total). `sample_config.toml` currently uses first height 0.2 (0.95 mm total,
+which triggers the thickness warning). Set `boundary_layer = None` / `enabled = false` to
+turn the layer off.
+
+**Sizing.** `radius_elements` N sets the size to 2πr/N, with r the `Radius` of the nearest
+`centerline.vtp` point, through gmsh's size callback. On **curves** (patch seams, rims) this
+size replaces gmsh's. On **surfaces and in the volume** the callback takes the smaller of the
+two, so curvature sizing still refines tight spots. Both are needed:
+- Curvature alone refines every patch seam into a band of tiny elements (next bullet list).
+- Radius alone is too coarse where the branches join the aorta: those wall points are
+  nearest the aorta centerline (2 mm) but the wall bends sharply. That gave 5 tets with
+  SICN ≈ 0, and without a boundary layer gmsh failed ("segment and facet intersect").
+- Combined, on the example case: wall 19k triangles (26k with curvature alone). Within
+  0.5 mm of a seam: 0.7% of triangles (was 16%). Min SICN 0.096–0.126 with a layer, 0.26
+  without one. In branches (r < 8 mm) curvature is finer and wins: edges ≈ 0.7 × 2πr/16.
+
+Example case. With curvature sizing only and the 0.71 mm layer: 331,573 tets (236k in the
+layer, 96k core), 63k nodes, 23 s. With combined sizing and the 0.95 mm layer from
+`sample_config.toml`: 256,624 tets (174k in the layer), 48k nodes, 26 s, min SICN 0.126, and
+the layer at exactly 0.2/0.5/0.95 mm. The checks below were run on the first and re-run on the
+second.
+Verified:
+- `validate()` passes: no untagged faces, each boundary triangle is a face of its tet, the
+  boundary is closed, and every tet has positive volume. All boundary faces point outward.
+- Wall: remeshed wall nodes lie exactly on the cut wall (max distance 0.0000 mm).
+- Volume: 0.16% below the volume enclosed by the cut wall (chordal error from remeshing).
+- Boundary layer: every one of the 13,206 wall nodes has a copy at 0.150, 0.375 and
+  0.7125 mm from the wall, exactly the cumulative heights.
+- Cap areas projected onto each plane are within 1% of the opening area.
+- Quality: min SICN 0.107 with Netgen (0.018 without). Without the boundary layer, one
+  sliver (SICN 0.004) survives, and the warning reports it.
+
+Findings:
+- **Sizing trap:** with gmsh's defaults `Mesh.MeshSizeFromPoints = 1` and
+  `MeshSizeExtendFromBoundary = 1`, sizes come from the input triangulation's nodes, so the
+  wall keeps its 0.65 mm edges whatever `size_max` says (1.87M tets). Both are set to 0.
+- **Patch seams:** `classifySurfaces` splits the wall into 15 patches (29 seam curves) for
+  reparametrization. The seams follow the input's zigzag edges, so curvature sizing on curves
+  made a dense ring at every seam: 69% of the smallest 5% of triangles were within 0.5 mm of
+  a seam. Fixed by radius sizing on curves (above).
+- **Caps are not flat with a boundary layer.** The layer's inner rim follows the wall
+  normal, and where the wall meets the plane obliquely the rim leaves the plane: up to
+  0.59 mm at the inlet (the wall there is up to 60° from perpendicular to the plane),
+  0.19–0.29 mm elsewhere (0.75 mm at the inlet with the 0.95 mm layer). The offset is
+  ≈ thickness × sin(tilt). gmsh's `aneurysm.py` has the same effect but only ≤ 0.15 (tilt
+  ≤ 18°, and its STL openings aren't flat to begin with), and it never checks. Without the
+  layer, caps are exactly flat. gmsh's `viewIndex` can
+  only scale the thickness, not change the direction. Fixes: more perpendicular planes, or
+  short flow extensions (cylinders along the plane normal) so the wall meets the cap at 90°.
+  Not done: open question.
+- **Most tets are in the boundary layer** (3 layers × 3 tets per prism × wall triangles).
+  The last layer (0.34 mm) is much thinner than the core edges (median 2.4 mm), a 7× jump.
+  The total thickness is capped by the smallest branch (r ≈ 2.6 mm → < 0.86 mm), so a smooth
+  transition needs a finer core near the wall (a size field) or a thinner wall mesh.
+
+Background and gmsh notes:
 
 - Merge the open wall surface; `classifySurfaces` + `createGeometry` so gmsh can
   reparametrize and remesh it. Feed it a reasonably smooth, well-shaped triangulation.
 - **Boundary layer:** `gmsh.model.geo.extrudeBoundaryLayer`, extruding **from the wall only**,
   then cap. If caps exist when extruding, rim nodes average the wall and cap normals and the
-  layer collapses at every inlet/outlet. This is why gmsh's `aneurysm.py` example (copy in
-  `mesh.py`) extrudes first and caps after.
+  layer collapses at every inlet/outlet. This is why gmsh's `aneurysm.py` example (in git at
+  `3bb40e8`) extrudes first and caps after.
 - `recombine=False` → prisms split into tets (CHeart and dolfinx need linear tets only).
 - Geometric growth: one element per layer, **cumulative** heights, sign on every entry
   (negative = inward for that example's normals). Heights are absolute distances, unlike
@@ -183,19 +251,23 @@ branches) could be used to check or set this.
   concave corners otherwise fold over). Match the core element size to the last layer size,
   `h1·r^(n-1)`. `viewIndex` can scale the thickness per node if needed.
 - gmsh does not detect folded layers. Check `getElementQualities` (min SICN > 0).
-- **Caps and labels:** find the open curve loops on the inner layer surface, match each loop
-  to the nearest plane → that plane's label, then `addPlaneSurface`. The rims are planar by
-  construction.
+- **Caps and labels:** find the open curve loops on the inner layer surface, then
+  `addPlaneSurface`. Labels are matched to planes after meshing, by geometry. The outer
+  rims are planar by construction; the inner rims are not (see Findings).
 - **Outlet labels include the boundary layer's annular side faces**, not only the core's flat
   cap. Easy to miss.
 - Size guide: one tet ≈ 0.12·h³ of volume. For a ~160 mL aorta, h = 2 mm gives roughly
   150–250k tets. Curvature refinement (`h_min`/`h_max`) helps the small arch branches.
 
-Open: remesh the surface in gmsh (size control, curvature refinement), or keep the smoothed
-pyvista surface and only fill the volume? The second is simpler but fixes surface element
-size. Leaning toward gmsh remeshing.
+Built: gmsh remeshing of the surface. Keeping the pyvista surface as-is (no remesh) isn't
+implemented.
 
-## 7. Neutral mesh
+## 7. Neutral mesh (`volume.py`, done)
+
+As below, plus `from_tets` (finds the boundary and parent tets, makes every tet positively
+oriented, winds boundary triangles outward), `volume`, `label_areas`, `summary`,
+`to_pyvista` (tets) and `boundary_pyvista` (labeled boundary). The CLI writes `mesh.vtu` and
+`boundary.vtp` with these.
 
 ```python
 @dataclass(frozen=True)
@@ -214,11 +286,31 @@ Every writer reads only this. Parent tets: build all tet faces as sorted triples
 
 ## 8. Writers
 
-**CHeart** (`.X` nodes, `.T` linear tets, `.B` labeled boundary triangles):
-- `.B` rows are `element n1 n2 n3 label`, 1-based. Each triangle must be a face of the tet
-  in its first column.
-- `.T` holds linear tets only.
-- **TODO:** confirm the exact header lines from a real SimModeler-derived file set.
+**CHeart** (`cheart.py`, done): `write_cheart(vm, dir, CheartOptions(name, scale))` and
+`read_cheart`. Whitespace-separated text, one header line, every index 1-based:
+
+| File | Header        | Rows (one per)                             |
+| ---- | ------------- | ------------------------------------------ |
+| `.X` | `N 3`         | node: `x y z` (`%.17g`, round-trips float64) |
+| `.T` | `M N`         | tet: `n1 n2 n3 n4` (rows of `.X`)          |
+| `.B` | `K`           | boundary triangle: `tet n1 n2 n3 label` (`tet` = row of `.T`) |
+
+- Nodes and tets are written in `VolumeMesh` order, so `.B`'s indices agree with `.T` and
+  `.X` by construction. `write_cheart` runs `validate()` first, which now also rejects nodes
+  no tet uses.
+- `scale` multiplies coordinates only (1.0 = mm, 1e-3 = m; §9). `.T`/`.B` don't change.
+- Tets are positively oriented and `.B` triangles wound outward. Whether CHeart needs a
+  particular node order within a tet is unconfirmed.
+- Verified on the example case, parsing the files independently of the package:
+  - headers match the row counts; all indices fall in 1..N and 1..M, and every node is used
+  - all 20,898 `.B` triangles are faces of their listed tet, and the set of `.B` triangles is
+    exactly the set of boundary faces of `.T`
+  - every tet read from the files has positive volume, and all `.B` triangles are wound
+    outward
+  - coordinates round-trip exactly; label counts match
+  - `read_cheart` gives back identical arrays, and `validate()` passes on them
+- **TODO:** confirm against a real SimModeler-derived file set: header lines, any trailing
+  metadata, tet node order.
 - **TODO:** copy label numbering from the existing MATLAB script, so existing CHeart input
   files keep working.
 - Don't depend on Will's `cheartpy`: it needs physical groups named `Surface1…`, and its
@@ -258,7 +350,10 @@ check the density in an existing CHeart input file. Store the mesh unit and give
 1. Label numbering expected by existing CHeart inputs (from the MATLAB script).
 2. Exact `.X/.T/.B` header format.
 3. Lab's unit convention (density in an existing input file).
-4. gmsh surface remeshing vs. keeping the pyvista surface (§6).
-5. Boundary-layer parameters (first-layer height from Reynolds number, growth, count).
+4. Non-flat caps with a boundary layer (§6 Findings): accept, require more perpendicular
+   planes, or add flow extensions?
+5. Boundary-layer parameters (first-layer height from Reynolds number, growth, count), and
+   the layer-to-core size jump (§6 Findings).
+6. Cut options (`margin`, `pad`, `snap`, `max_area_ratio`) aren't in the TOML yet.
 
 Decided: `requires-python` stays `>=3.14` (Nov 2026).

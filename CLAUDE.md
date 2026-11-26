@@ -21,22 +21,28 @@ what's next, and the open questions.
 
 ```bash
 uv sync                                                  # Python 3.14 (.python-version)
-uv run aortamesh -cd examples/with_arch_branches       # or: uv run python -m aortamesh
+uv run aortamesh -c sample_config.toml                   # ~25 s on the example case
+uv run aortamesh -cd examples/with_arch_branches       # defaults; or: uv run python -m aortamesh
 uv run ruff check src
 uv run pytest                                            # no tests yet
 ```
 
-The CLI (`cli.py`, work in progress) prints one line per plane and writes
-`<case>/preview/*.vtp` for ParaView. Lint config is `ruff.toml`; `.vscode/settings.json`
+The CLI (`cli.py`) prints one line per plane and per opening, then a mesh summary. It writes
+`<case>/preview/*.vtp` (surface, clip polygons, outlines, cut wall) and `<output>/mesh.vtu` +
+`boundary.vtp` + CHeart `mesh.X/.T/.B` (default output `<case>/mesh/`). `-cd`/`-o` override the config. Lint config is `ruff.toml`; `.vscode/settings.json`
 makes the VS Code extension use it over user settings.
 
 ## Layout
 
-- `src/aortamesh/io.py`: `read_surface`, `read_cut`, `read_cuts`, `load_case` → `Case(surface, cuts)`
+- `src/aortamesh/io.py`: `read_surface`, `read_cut`, `read_cuts`, `read_centerline` → `Centerline(points, radius)`, `load_case` → `Case(surface, cuts, centerline)` (centerline is None if there's no `centerline.vtp`)
 - `src/aortamesh/clip.py`: `RayCaster`, `fit_cross_section` → `CrossSection`, `clipping_surface`, `section_outline`
 - `src/aortamesh/cut.py`: `cut_surface(surface, sections)` → open wall `pv.PolyData` + `list[Opening]`; `boundary_loops`
 - `src/aortamesh/cli.py` (+ `__main__.py`): `main(argv=None)`, entry point `aortamesh`
-- `src/aortamesh/mesh.py`: still the scratch copy of gmsh's `aneurysm.py` boundary-layer example. It runs gmsh at import, so don't import it.
+- `src/aortamesh/mesh.py`: `mesh_volume(wall, openings, MeshOptions, centerline)` → `VolumeMesh`; `BoundaryLayer`, `enclosed_volume`
+- `src/aortamesh/volume.py`: `VolumeMesh` (`from_tets`, `validate`, `summary`, `to_pyvista`, `boundary_pyvista`)
+- `src/aortamesh/cheart.py`: `write_cheart(vm, dir, CheartOptions(name, scale))` → `<name>.X/.T/.B`; `read_cheart` (round trip, header checks)
+- `src/aortamesh/config.py`: `load_config(toml)` → `Config(directory, output, mesh, cheart)`; unknown keys are errors
+- `sample_config.toml`: every option with its default
 - `examples/with_arch_branches/`: `surface.vtp`, `centerline.vtp`, `inlet/branch1..3/outlet.mrk.json`
 - `examples/no_arch_branches/`: `surface.vtp`, `centerline.vtp` (no planes yet)
 
@@ -57,6 +63,8 @@ makes the VS Code extension use it over user settings.
   arch), `outlet`. The file name becomes the cap label name.
 - Plane centers must be inside the lumen (`load_case` checks this) but needn't be centered.
 - Plane normal sign is arbitrary; the code decides which side to discard.
+- `centerline.vtp`: from Slicer's Extract Centerline, with a `Radius` point array. Optional,
+  but radius sizing (`radius_elements > 0`, the default) needs it.
 
 ## Known traps
 
@@ -64,5 +72,13 @@ makes the VS Code extension use it over user settings.
   sorts by coordinate). Use `RayCaster`, which sorts by distance along the ray.
 - A ray through a shared edge reports the same hit once per cell; `RayCaster` merges these.
   Without that, a duplicate looks like a neighbouring vessel at 0 mm.
+- gmsh sizes the remeshed wall from the input triangulation unless `Mesh.MeshSizeFromPoints`
+  and `Mesh.MeshSizeExtendFromBoundary` are 0 (`_set_mesh_options` sets both). Otherwise
+  `size_max` is silently ignored.
+- Don't use curvature sizing on its own: gmsh applies it to the patch seams too, which
+  zigzag along the input edges and become bands of tiny elements. And don't use radius
+  sizing on its own: it's too coarse at the branch ostia and produces flat tets. The size
+  callback in `_set_radius_sizing` combines them (radius on curves, the smaller of the two
+  elsewhere).
 - `.mrk.json` files don't include parent transforms from the Slicer scene. Planes and model
   must not sit under a transform when saved.
