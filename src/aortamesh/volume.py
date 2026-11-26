@@ -127,13 +127,10 @@ class VolumeMesh:
         """Boundary triangles with ``cell_data["label"]``, for checking labels in ParaView."""
         surf = pv.PolyData.from_regular_faces(self.points, self.bnd_tris)
         surf.cell_data["label"] = self.bnd_labels
-        surf.field_data["label_names"] = [
-            f"{lab}:{name}" for lab, name in self.label_names.items()
-        ]
+        surf.field_data["label_names"] = [f"{lab}:{name}" for lab, name in self.label_names.items()]
         return surf.clean(point_merging=False)  # drops interior points
 
 
 def _signed_volumes(points: np.ndarray, tets: np.ndarray) -> np.ndarray:
     a, b, c, d = (points[tets[:, i]] for i in range(4))
     return np.einsum("ij,ij->i", np.cross(b - a, c - a), d - a) / 6.0
-

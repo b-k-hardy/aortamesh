@@ -26,17 +26,17 @@ normal aorta *fluid* domain is currently desired.
 
 ## 2. Pipeline
 
-| Stage          | What                                                             | Status   |
-| -------------- | ---------------------------------------------------------------- | -------- |
-| Slicer         | segment, export closed surface (VTP), place planes (`.mrk.json`) | manual   |
-| Load           | `io.load_case` → surface + ordered cuts, LPS, float64            | **done** |
-| Cross-sections | ray-cast each plane, re-center, clip polygon                     | **done** |
-| Cut            | split surface with each clip polygon, remove the piece beyond it | **done** |
-| Mesh           | gmsh: reparametrize, boundary layer, cap, fill, label            | **done** |
-| Neutral mesh   | `VolumeMesh` dataclass                                           | **done** |
+| Stage          | What                                                                | Status   |
+| -------------- | ------------------------------------------------------------------- | -------- |
+| Slicer         | segment, export closed surface (VTP), place planes (`.mrk.json`)    | manual   |
+| Load           | `io.load_case` → surface + ordered cuts, LPS, float64               | **done** |
+| Cross-sections | ray-cast each plane, re-center, clip polygon                        | **done** |
+| Cut            | split surface with each clip polygon, remove the piece beyond it    | **done** |
+| Mesh           | gmsh: reparametrize, boundary layer, cap, fill, label               | **done** |
+| Neutral mesh   | `VolumeMesh` dataclass                                              | **done** |
 | Config         | TOML → `Config` / `MeshOptions` (`config.py`, `sample_config.toml`) | **done** |
-| Writers        | CHeart X/T/B (**done**, `cheart.py`); VTU via `to_pyvista`; XDMF | partial  |
-| Checks         | quality, label coverage, cap areas                               | partial  |
+| Writers        | CHeart X/T/B (**done**, `cheart.py`); VTU via `to_pyvista`; XDMF    | partial  |
+| Checks         | quality, label coverage, cap areas                                  | partial  |
 
 ## 3. Inputs from Slicer
 
@@ -289,11 +289,11 @@ Every writer reads only this. Parent tets: build all tet faces as sorted triples
 **CHeart** (`cheart.py`, done): `write_cheart(vm, dir, CheartOptions(name, scale))` and
 `read_cheart`. Whitespace-separated text, one header line, every index 1-based:
 
-| File | Header        | Rows (one per)                             |
-| ---- | ------------- | ------------------------------------------ |
-| `.X` | `N 3`         | node: `x y z` (`%.17g`, round-trips float64) |
-| `.T` | `M N`         | tet: `n1 n2 n3 n4` (rows of `.X`)          |
-| `.B` | `K`           | boundary triangle: `tet n1 n2 n3 label` (`tet` = row of `.T`) |
+| File | Header | Rows (one per)                                                |
+| ---- | ------ | ------------------------------------------------------------- |
+| `.X` | `N 3`  | node: `x y z` (`%.17g`, round-trips float64)                  |
+| `.T` | `M N`  | tet: `n1 n2 n3 n4` (rows of `.X`)                             |
+| `.B` | `K`    | boundary triangle: `tet n1 n2 n3 label` (`tet` = row of `.T`) |
 
 - Nodes and tets are written in `VolumeMesh` order, so `.B`'s indices agree with `.T` and
   `.X` by construction. `write_cheart` runs `validate()` first, which now also rejects nodes

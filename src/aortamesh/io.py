@@ -45,9 +45,7 @@ def read_surface(path: str | Path, coordinate_system: str = "LPS") -> pv.PolyDat
         src = str(np.asarray(surf.field_data["SPACE"]).ravel()[0])
 
     surf = surf.triangulate().clean()
-    surf.points = _convert(
-        np.asarray(surf.points, dtype=np.float64), src, coordinate_system
-    )
+    surf.points = _convert(np.asarray(surf.points, dtype=np.float64), src, coordinate_system)
     # Slicer's normals are float32 and would be stale after any flip; recompute on demand.
     surf.point_data.pop("Normals", None)
     surf.field_data["SPACE"] = [coordinate_system.upper()]
@@ -95,9 +93,7 @@ class Cut:
     """One Slicer plane markup: where to cut the vessel and what to call the cap."""
 
     name: str  # from the file stem: "inlet", "branch1", ..., "outlet"
-    center: (
-        np.ndarray
-    )  # (3,) a point on the plane, inside the lumen (not necessarily centered)
+    center: np.ndarray  # (3,) a point on the plane, inside the lumen (not necessarily centered)
     normal: np.ndarray  # (3,) unit normal; its sign is arbitrary and is fixed later
 
 

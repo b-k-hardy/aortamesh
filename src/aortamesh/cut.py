@@ -69,7 +69,13 @@ def cut_surface(
     openings = []
     for section in sections:
         pts, tris, opening = _cut_one(
-            pts, tris, section, margin, pad, snap * h, max_area_ratio,
+            pts,
+            tris,
+            section,
+            margin,
+            pad,
+            snap * h,
+            max_area_ratio,
         )
         openings.append(opening)
 

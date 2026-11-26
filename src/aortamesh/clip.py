@@ -57,9 +57,7 @@ class RayCaster:
             t = t[np.r_[True, np.diff(t) > self._merge]]
         return t
 
-    def hits(
-        self, origin: np.ndarray, directions: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def hits(self, origin: np.ndarray, directions: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Distances to the first and second surface hits along each unit direction.
 
         From inside the lumen, the first hit is the wall of this vessel and the second

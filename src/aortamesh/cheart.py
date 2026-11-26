@@ -81,9 +81,13 @@ def read_cheart(
     if t.min() < 1 or t.max() > len(x):
         problems.append(f".T node indices span {t.min()}..{t.max()}, expected 1..{len(x)}")
     if b[:, 0].min() < 1 or b[:, 0].max() > len(t):
-        problems.append(f".B tet indices span {b[:, 0].min()}..{b[:, 0].max()}, expected 1..{len(t)}")
+        problems.append(
+            f".B tet indices span {b[:, 0].min()}..{b[:, 0].max()}, expected 1..{len(t)}"
+        )
     if b[:, 1:4].min() < 1 or b[:, 1:4].max() > len(x):
-        problems.append(f".B node indices span {b[:, 1:4].min()}..{b[:, 1:4].max()}, expected 1..{len(x)}")
+        problems.append(
+            f".B node indices span {b[:, 1:4].min()}..{b[:, 1:4].max()}, expected 1..{len(x)}"
+        )
     if problems:
         raise ValueError(f"{stem}: " + "; ".join(problems))
 

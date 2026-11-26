@@ -80,7 +80,9 @@ class MeshOptions:
     # the seams between the wall's patches, and every seam becomes a band of tiny elements.
     curvature_elements: int = 20
     optimize_netgen: bool = True
-    min_quality: float = 0.05  # warn below this min SICN (gmsh's quality: 1 = regular, <= 0 = inverted)
+    min_quality: float = (
+        0.05  # warn below this min SICN (gmsh's quality: 1 = regular, <= 0 = inverted)
+    )
     boundary_layer: BoundaryLayer | None = field(default_factory=BoundaryLayer)
     verbose: bool = False  # print gmsh's log
 
@@ -219,7 +221,10 @@ def _extrude_boundary_layer(
     # One element per layer, cumulative heights. Negative = against the surface normals, which
     # point out of the lumen (Slicer's closed surfaces are outward oriented).
     out = gmsh.model.geo.extrudeBoundaryLayer(
-        walls, [1] * bl.layers, (-bl.heights).tolist(), False,
+        walls,
+        [1] * bl.layers,
+        (-bl.heights).tolist(),
+        False,
     )
     gmsh.model.geo.synchronize()
     return [e for e in out if e[0] == 2]
