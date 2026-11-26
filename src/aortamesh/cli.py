@@ -16,6 +16,7 @@ from aortamesh.clip import (
     fit_cross_section,
     section_outline,
 )
+from aortamesh.cut import cut_surface
 from aortamesh.io import load_case
 
 
@@ -37,11 +38,18 @@ def main(argv: list[str] | None = None) -> None:
     out.mkdir(exist_ok=True)
     case.surface.save(out / "surface.vtp")
 
+    sections = []
     for cut in case.cuts:
         section = fit_cross_section(caster, cut)
         print(section.summary())
         clipping_surface(section).save(out / f"clip_{cut.name}.vtp")
         section_outline(section).save(out / f"outline_{cut.name}.vtp")
+        sections.append(section)
+
+    wall, openings = cut_surface(case.surface, sections)
+    for o in openings:
+        print(o.summary())
+    wall.save(out / "wall.vtp")
 
     print(f"wrote {out}")
 

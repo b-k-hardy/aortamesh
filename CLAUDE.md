@@ -21,20 +21,24 @@ what's next, and the open questions.
 
 ```bash
 uv sync                                                  # Python 3.14 (.python-version)
-uv run python examples/preview_cuts.py examples/with_arch_branches
-uv run ruff check src examples
+uv run aortamesh -cd examples/with_arch_branches       # or: uv run python -m aortamesh
+uv run ruff check src
 uv run pytest                                            # no tests yet
 ```
 
-`preview_cuts.py` prints one line per plane and writes `<case>/preview/*.vtp` for ParaView.
+The CLI (`cli.py`, work in progress) prints one line per plane and writes
+`<case>/preview/*.vtp` for ParaView. Lint config is `ruff.toml`; `.vscode/settings.json`
+makes the VS Code extension use it over user settings.
 
 ## Layout
 
 - `src/aortamesh/io.py`: `read_surface`, `read_cut`, `read_cuts`, `load_case` → `Case(surface, cuts)`
 - `src/aortamesh/clip.py`: `RayCaster`, `fit_cross_section` → `CrossSection`, `clipping_surface`, `section_outline`
+- `src/aortamesh/cut.py`: `cut_surface(surface, sections)` → open wall `pv.PolyData` + `list[Opening]`; `boundary_loops`
+- `src/aortamesh/cli.py` (+ `__main__.py`): `main(argv=None)`, entry point `aortamesh`
+- `src/aortamesh/mesh.py`: still the scratch copy of gmsh's `aneurysm.py` boundary-layer example. It runs gmsh at import, so don't import it.
 - `examples/with_arch_branches/`: `surface.vtp`, `centerline.vtp`, `inlet/branch1..3/outlet.mrk.json`
 - `examples/no_arch_branches/`: `surface.vtp`, `centerline.vtp` (no planes yet)
-- `mesh.py` (repo root): scratch copy of gmsh's `aneurysm.py` boundary-layer example; not part of the package
 
 ## Conventions
 

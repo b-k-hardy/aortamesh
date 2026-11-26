@@ -31,8 +31,8 @@ normal aorta *fluid* domain is currently desired.
 | Slicer         | segment, export closed surface (VTP), place planes (`.mrk.json`) | manual   |
 | Load           | `io.load_case` → surface + ordered cuts, LPS, float64            | **done** |
 | Cross-sections | ray-cast each plane, re-center, clip polygon                     | **done** |
-| Cut            | split surface with each clip polygon, remove the piece beyond it | **next** |
-| Mesh           | gmsh: reparametrize, boundary layer, cap, fill, label            | todo     |
+| Cut            | split surface with each clip polygon, remove the piece beyond it | **done** |
+| Mesh           | gmsh: reparametrize, boundary layer, cap, fill, label            | **next** |
 | Neutral mesh   | `VolumeMesh` dataclass                                           | todo     |
 | Writers        | CHeart X/T/B, XDMF, VTU                                          | todo     |
 | Checks         | quality, label coverage, cap areas                               | todo     |
@@ -113,20 +113,54 @@ Verified: hits lie on the wall (< 1e-4 mm); no polygon vertex is inside the lume
 surface point inside a polygon belongs to that polygon's own vessel (< 0.08 mm). Before the
 halfway limit, the branch1 polygon came within ~1 mm of the neighbouring branch.
 
-## 5. Next: cutting
+## 5. Cutting (`cut.py`, done)
 
-Plan:
-- Cut the surface along each clip polygon (only where the polygon is, not the whole plane).
-- Of the two pieces, **discard the smaller by area**: the stub beyond the cut (branch tip,
-  root/LV below the inlet). The main aorta is always the larger piece.
-- Log the area ratio; a ratio near 1 means the plane is in a strange place (e.g. cutting the
-  arch in half). Stop and report rather than guess.
-- Flip each stored normal to point into the discarded piece, giving consistent outward cap
-  normals (also needed for inflow profiles).
-- **Don't cap in pyvista** if a boundary layer will be used (see §6). Output the open wall
-  surface plus, for each opening, its plane and label name.
-- Cut planes should be close to perpendicular to the vessel, or the boundary layer at the rim
-  comes out skewed. The centerline (`centerline.vtp`) could be used to check or set this.
+`cut_surface(surface, sections) -> (wall, openings)`. Cuts run in order, each on the
+already-cut surface. For each section, only the plane inside its clip polygon is used:
+
+1. Snap vertices within `snap` × median edge length (default 0.2) of the plane, and inside
+   the polygon, onto the plane. Without this the cut leaves slivers next to vertices.
+2. The triangles inside the polygon that cross or touch the plane form a closed strip around
+   the vessel. Without the strip, the rest of the surface splits into one piece per side.
+   Anything other than exactly two pieces → error.
+3. **Discard the smaller piece by area** (branch tip, root below the inlet). Ratio >
+   `max_area_ratio` (0.5) → error: the plane probably cuts across the main vessel.
+4. Clip the strip triangles exactly at the plane, keeping the kept side. Points on crossed
+   edges are shared, so the wall stays watertight apart from the openings, and each rim
+   lies in its plane.
+
+Each `Opening` has the name, section center, **outward normal (into the discarded piece)**,
+ordered rim points, cap area, discarded area and area ratio. **No caps** (boundary layer first,
+§6). The wall has no `label` cell data yet (numbering is open, §11). `boundary_loops(tris)`
+orders the open edges into loops.
+
+Example case (`with_arch_branches`), about 1.2 s for 5 cuts:
+
+| Plane   | Cap area (mm²) | Cap / section | Discarded (mm²) | Area ratio |
+| ------- | -------------- | ------------- | --------------- | ---------- |
+| inlet   | 649.1          | 1.0017        | 2655            | 0.096      |
+| branch1 | 67.3           | 1.0018        | 121             | 0.004      |
+| branch2 | 21.1           | 1.0006        | 48              | 0.002      |
+| branch3 | 71.3           | 1.0000        | 187             | 0.006      |
+| outlet  | 339.3          | 1.0012        | 1437            | 0.055      |
+
+Verified:
+- Topology: exactly one boundary loop per plane, no non-manifold edges.
+- Rims: on their planes to < 6e-14 mm, with radii matching the ray-cast radii.
+- Cap areas: within 0.2% of the section area. Before snapping they were all 1.0013, the
+  expected ratio for a 72-ray polygon inscribed in a much finer rim.
+- Normals: no kept wall vertex near a rim lies on the outward side, and 1 mm out along the
+  normal is inside the original lumen.
+- Unchanged surface: only the 184 snapped vertices moved (max 0.09 mm, 0.14 of an edge);
+  every other point is exactly on the original surface. Kept plus discarded area matches the
+  original to 0.18 mm² (the snapping).
+- Mesh quality: worst triangle quality 0.21 (original 0.44). With `snap` = 0.05, 17
+  triangles fell below 0.1.
+- Rejection: a plane across the mid-aorta (from the centerline) is rejected (ratio 0.79).
+
+Still open: cut planes should be close to perpendicular to the vessel, or the boundary layer
+at the rim comes out skewed. The centerline (`centerline.vtp`, 4 polylines: aorta + 3
+branches) could be used to check or set this.
 
 ## 6. Meshing in gmsh
 
