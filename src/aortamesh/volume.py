@@ -123,10 +123,28 @@ class VolumeMesh:
         types = np.full(len(self.tets), pv.CellType.TETRA, dtype=np.uint8)
         return pv.UnstructuredGrid(cells, types, self.points)
 
+    def node_normals(self) -> np.ndarray:
+        """(N, 3) outward unit normal at each boundary node; zero at interior nodes.
+
+        The area-weighted average of the adjacent boundary triangles' normals (they're wound
+        outward). Rows match ``points``. At a rim node, where the wall meets a cap, this
+        averages both, so the normal points diagonally out of the corner.
+        """
+        a, b, c = (self.points[self.bnd_tris[:, i]] for i in range(3))
+        face = np.cross(b - a, c - a)  # length = 2 * area, so the sum is area-weighted
+        acc = np.zeros_like(self.points)
+        for i in range(3):
+            np.add.at(acc, self.bnd_tris[:, i], face)
+        length = np.linalg.norm(acc, axis=1)
+        on_bnd = length > 0
+        acc[on_bnd] /= length[on_bnd, None]
+        return acc
+
     def boundary_pyvista(self) -> pv.PolyData:
-        """Boundary triangles with ``cell_data["label"]``, for checking labels in ParaView."""
+        """Boundary triangles with ``cell_data["label"]`` and ``point_data["normal"]``."""
         surf = pv.PolyData.from_regular_faces(self.points, self.bnd_tris)
         surf.cell_data["label"] = self.bnd_labels
+        surf.point_data["normal"] = self.node_normals()
         surf.field_data["label_names"] = [f"{lab}:{name}" for lab, name in self.label_names.items()]
         return surf.clean(point_merging=False)  # drops interior points
 

@@ -40,8 +40,8 @@ makes the VS Code extension use it over user settings.
 - `src/aortamesh/cut.py`: `cut_surface(surface, sections)` → open wall `pv.PolyData` + `list[Opening]`; `boundary_loops`
 - `src/aortamesh/cli.py` (+ `__main__.py`): `main(argv=None)`, entry point `aortamesh`
 - `src/aortamesh/mesh.py`: `mesh_volume(wall, openings, MeshOptions, centerline)` → `VolumeMesh`; `BoundaryLayer`, `enclosed_volume`
-- `src/aortamesh/volume.py`: `VolumeMesh` (`from_tets`, `validate`, `summary`, `to_pyvista`, `boundary_pyvista`)
-- `src/aortamesh/cheart.py`: `write_cheart(vm, dir, CheartOptions(name, scale))` → `<name>.X/.T/.B`; `read_cheart` (round trip, header checks)
+- `src/aortamesh/volume.py`: `VolumeMesh` (`from_tets`, `validate`, `summary`, `node_normals`, `to_pyvista`, `boundary_pyvista`)
+- `src/aortamesh/cheart.py`: `write_cheart(vm, dir, CheartOptions(name, scale, normals))` → `<name>.X/.T/.B` (+ `normals.D`); `read_cheart` (round trip, header checks)
 - `src/aortamesh/config.py`: `load_config(toml)` → `Config(directory, output, mesh, cheart)`; unknown keys are errors
 - `sample_config.toml`: every option with its default
 - `examples/with_arch_branches/`: `surface.vtp`, `centerline.vtp`, `inlet/branch1..3/outlet.mrk.json`

@@ -160,8 +160,10 @@ Verified:
 - Rejection: a plane across the mid-aorta (from the centerline) is rejected (ratio 0.79).
 
 Still open: cut planes should be close to perpendicular to the vessel, or the boundary layer
-at the rim comes out skewed. The centerline (`centerline.vtp`, 4 polylines: aorta + 3
-branches) could be used to check or set this.
+at the rim comes out skewed. The centerline could be used to check or set this.
+`centerline.vtp` holds 4 polylines, each a path from the inlet to one end (outlet,
+branch3, branch2, branch1). They overlap along the ascending aorta and arch, so a polyline
+is not one vessel.
 
 ## 6. Meshing in gmsh (`mesh.py`, done)
 
@@ -221,14 +223,90 @@ Findings:
   0.19–0.29 mm elsewhere (0.75 mm at the inlet with the 0.95 mm layer). The offset is
   ≈ thickness × sin(tilt). gmsh's `aneurysm.py` has the same effect but only ≤ 0.15 (tilt
   ≤ 18°, and its STL openings aren't flat to begin with), and it never checks. Without the
-  layer, caps are exactly flat. gmsh's `viewIndex` can
-  only scale the thickness, not change the direction. Fixes: more perpendicular planes, or
-  short flow extensions (cylinders along the plane normal) so the wall meets the cap at 90°.
-  Not done: open question.
+  layer, caps are exactly flat. More precisely (0.95 mm layer): the cap's centre is flat
+  (residual 0.0000 mm) but lies on gmsh's best-fit plane through the non-flat inner rim. That
+  plane is tilted 0.5° (inlet, outlet) to 3.9° (branch1) from the cut plane and shifted up
+  to 0.32 mm along it. The layer's ring-shaped side faces, labelled as cap, tilt with the
+  wall (up to 50° at the inlet).
+  Fixes (open question):
+  1. Our own extrusion normals through `extrudeBoundaryLayer(..., viewIndex)`. **Prototyped
+     and working: see "Potential direction" below.**
+  2. Build the layer ourselves in numpy and let gmsh fill only the core.
+  3. Flow extensions (cylinders along the plane normal), so the wall meets the cap at 90°.
+     gmsh's `naca_boundary_layer_3d.py` gets a flat symmetry plane this way: the wing meets
+     it at 90°.
+  With 1 or 2, a steeply tilted rim gives skewed layer cells (perpendicular thickness about
+  cos(tilt) at the rim), so more perpendicular planes still help.
 - **Most tets are in the boundary layer** (3 layers × 3 tets per prism × wall triangles).
   The last layer (0.34 mm) is much thinner than the core edges (median 2.4 mm), a 7× jump.
   The total thickness is capped by the smallest branch (r ≈ 2.6 mm → < 0.86 mm), so a smooth
   transition needs a finer core near the wall (a size field) or a thinner wall mesh.
+
+### Potential direction: custom extrusion normals (prototyped Nov 2026, not built)
+
+`extrudeBoundaryLayer(..., viewIndex=v)` with a **vector** view uses the view as the extrusion
+normals, and the **length of each vector multiplies the layer heights** at that point. The
+number of layers stays the same everywhere. (A scalar view only scales the thickness.) That
+gives two features with no change to the rest of the pipeline.
+
+**How the prototype did it.** All of this happens before meshing, and there's still one
+`generate(3)`.
+- Outward area-weighted vertex normals on the *input* cut wall.
+- Within `blend` mm of a rim, remove each normal's component along the cap normal `c`:
+  `n − (1 − w)(n·c)c`, with `w` a smoothstep from 0 at the rim to 1 at `blend`, then
+  renormalize.
+- Pass them as a list-based view: `gmsh.view.addListData(v, "VT", ...)`, a vector at each
+  corner of every input triangle.
+- gmsh looks a list view up **by position**, and the remeshed wall nodes lie on the input
+  surface. So the view doesn't have to wait for the wall to be remeshed, which was the
+  worry before prototyping.
+- Height sign is the same as without a view: negative heights grow the layer against the
+  vectors, i.e. inward for outward normals.
+
+**Flat caps** (unit-length normals, `blend` = 3 mm, 0.83 mm layer):
+
+| | Gmsh normals (current) | Bent normals |
+| --- | --- | --- |
+| Cap nodes off the cut plane, max | 0.70 mm inlet, 0.22–0.37 mm others | ≤ 2e-13 mm, every cap incl. side ring |
+| Layer heights away from rims | 0.175 / 0.437 / 0.831 | unchanged |
+| `validate`, volume vs enclosed | ok, −0.18% | ok, −0.27% |
+| Worst tet (min SICN) | 0.112 | 0.089 at the inlet rim (2 tets < 0.1); other rims ≥ 0.14 |
+
+`blend` = 6 mm made almost no difference (worst 0.091). The trade-off is the expected one:
+the layer leans where the wall is tilted, and its thickness perpendicular to the wall at the
+rim is cos(tilt). That's 0.51× at the inlet (tilt 59.6°), 0.90–0.93× at the branches and
+0.96× at the outlet.
+
+**Vector length.** The layer tops land at local length × configured height:
+- uniform 0.5: distance/length = 0.1749 / 0.4374 / 0.8310 in the aorta, the configured
+  heights exactly
+- local radius / 10 mm (0.23–1.59): the same ratios in every vessel size (77–98% of layer
+  nodes within 2% of a layer top; the spread comes from the nearest-centerline lookup near
+  junctions)
+- uniform 2: gmsh fails ("segment and facet intersect"). 1.66 mm is too thick for branch2.
+
+**What it enables:**
+1. **Full thickness at tilted rims:** scale the bent rim normals by 1/cos(tilt) to keep the
+   thickness perpendicular to the wall (about 2× at the inlet's steepest point). The layer
+   then reaches further across the cap plane.
+2. **Thickness that follows the vessel** with a fixed number of layers, e.g. ∝ local
+   radius. The aorta gets a thick layer and the branches a thin one, and the one-third limit
+   holds everywhere, instead of the smallest branch setting one thickness for all (§6
+   Findings, open question 5).
+
+**Before building it:**
+- Smooth the length field over the wall. The nearest centerline radius jumps at branch
+  junctions.
+- Thin layers mean lower quality. The uniform 0.5 run had 43k tets with SICN < 0.1 (worst
+  0.048), and the radius/10 run had 1.9k (worst 0.055). That's expected for thin layers,
+  but `min_quality` (0.05) would start warning.
+- With a fixed layer count, the first-layer height scales too (about 0.04 mm in branch2 at
+  radius/10). Whether thickness should go with r, r/√Re or similar is a modelling choice.
+- Integration sketch: build the normals (and lengths) in `mesh_volume`, add the view before
+  `_extrude_boundary_layer`, and pass its index. New `BoundaryLayer` options might be
+  `cap_blend` (mm; 0 = current behaviour) and a thickness mode (`uniform` / `radius`).
+- The prototype script was a scratchpad file, not kept in the repo. Everything it did is
+  described above.
 
 Background and gmsh notes:
 
@@ -249,7 +327,8 @@ Background and gmsh notes:
   ```
 - Keep total layer thickness < ~1/3 of the smallest local radius (converging normals in
   concave corners otherwise fold over). Match the core element size to the last layer size,
-  `h1·r^(n-1)`. `viewIndex` can scale the thickness per node if needed.
+  `h1·r^(n-1)`. `viewIndex` can scale the thickness per node (scalar view) or set
+  the normals (vector view).
 - gmsh does not detect folded layers. Check `getElementQualities` (min SICN > 0).
 - **Caps and labels:** find the open curve loops on the inner layer surface, then
   `addPlaneSurface`. Labels are matched to planes after meshing, by geometry. The outer
@@ -299,6 +378,20 @@ Every writer reads only this. Parent tets: build all tet faces as sorted triples
   `.X` by construction. `write_cheart` runs `validate()` first, which now also rejects nodes
   no tet uses.
 - `scale` multiplies coordinates only (1.0 = mm, 1e-3 = m; §9). `.T`/`.B` don't change.
+- `normals = true` also writes `normals.D`, structured like `.X` (header `N 3`, row i = node
+  i). Each row is the outward unit normal from `VolumeMesh.node_normals()`: the area-weighted
+  average of the adjacent boundary triangles' normals, and zero at interior nodes. It's
+  computed in numpy, not pyvista's `compute_normals`, which can split or renumber points.
+  Not scaled. Also in `boundary.vtp` as `point_data["normal"]`.
+  - Verified (0.95 mm layer): 48,424 rows match `.X`, and the non-zero rows are exactly the
+    10,451 nodes in `.B`, all unit length. A step of 0.05 or 0.01 mm along +n leaves the
+    domain and along −n enters it, at every boundary node. Wall nodes agree with pyvista
+    to a median of 0.24° (p99 2.1°; the gap is area weighting).
+  - Rim nodes (136, where the wall meets a cap) average both surfaces. The thin side-ring
+    triangles count for little, so the normal leans toward the wall: median 81° from the
+    cap normal (VTK's unweighted average would give about 45°). There's no single correct
+    normal at a corner. If a solver needs cap-only or wall-only normals there, they'd have
+    to be computed per label.
 - Tets are positively oriented and `.B` triangles wound outward. Whether CHeart needs a
   particular node order within a tet is unconfirmed.
 - Verified on the example case, parsing the files independently of the package:
@@ -350,10 +443,12 @@ check the density in an existing CHeart input file. Store the mesh unit and give
 1. Label numbering expected by existing CHeart inputs (from the MATLAB script).
 2. Exact `.X/.T/.B` header format.
 3. Lab's unit convention (density in an existing input file).
-4. Non-flat caps with a boundary layer (§6 Findings): accept, require more perpendicular
-   planes, or add flow extensions?
+4. Non-flat caps with a boundary layer (§6 Findings). Custom extrusion normals fix it
+   (prototyped, §6 "Potential direction"); not yet built. Alternatives: more perpendicular
+   planes, or flow extensions.
 5. Boundary-layer parameters (first-layer height from Reynolds number, growth, count), and
-   the layer-to-core size jump (§6 Findings).
+   the layer-to-core size jump (§6 Findings). Variable thickness with a fixed layer count is
+   possible through the view's vector lengths (§6 "Potential direction").
 6. Cut options (`margin`, `pad`, `snap`, `max_area_ratio`) aren't in the TOML yet.
 
 Decided: `requires-python` stays `>=3.14` (Nov 2026).

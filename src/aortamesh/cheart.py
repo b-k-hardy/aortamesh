@@ -5,6 +5,7 @@ All three are whitespace-separated text with a one-line header, and every index 
     .X   N 3               then N rows:  x y z
     .T   M N               then M rows:  n1 n2 n3 n4         (rows of .X)
     .B   K                 then K rows:  tet n1 n2 n3 label  (tet = row of .T, n = rows of .X)
+    .D   N 3               then N rows:  nx ny nz            (optional normals.D, row i = node i)
 
 Each ``.B`` triangle is a face of the tet in its first column. Nodes are written in
 ``VolumeMesh`` order and tets in ``VolumeMesh`` order, so the indices in all three files agree
@@ -27,6 +28,9 @@ class CheartOptions:
     # Multiplies coordinates on output: 1.0 keeps mm, 1e-3 gives m. The density and viscosity
     # entered in CHeart must match (design.md §9).
     scale: float = 1.0
+    # Also write <output>/normals.D: each node's outward unit surface normal, zero at interior
+    # nodes, one row per .X row. Not scaled.
+    normals: bool = False
 
     def __post_init__(self) -> None:
         if not self.name or "/" in self.name:
@@ -39,8 +43,9 @@ def write_cheart(
     vm: VolumeMesh,
     directory: str | Path,
     options: CheartOptions | None = None,
-) -> tuple[Path, Path, Path]:
-    """Write ``<directory>/<name>.X/.T/.B``. Validates the mesh first. Returns the three paths."""
+) -> list[Path]:
+    """Write ``<directory>/<name>.X/.T/.B`` (and ``normals.D`` if asked). Validates the mesh
+    first. Returns the paths written."""
     options = options or CheartOptions()
     vm.validate()
     stem = Path(directory) / options.name
@@ -52,7 +57,13 @@ def write_cheart(
     np.savetxt(t_path, vm.tets + 1, fmt="%d", header=f"{m} {n}", comments="")
     rows = np.c_[vm.bnd_tet + 1, vm.bnd_tris + 1, vm.bnd_labels]
     np.savetxt(b_path, rows, fmt="%d", header=f"{k}", comments="")
-    return x_path, t_path, b_path
+    paths = [x_path, t_path, b_path]
+
+    if options.normals:
+        d_path = Path(directory) / "normals.D"
+        np.savetxt(d_path, vm.node_normals(), fmt="%.17g", header=f"{n} 3", comments="")
+        paths.append(d_path)
+    return paths
 
 
 def read_cheart(
